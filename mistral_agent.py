@@ -31,4 +31,4 @@ class MistralWorker(qtc.QThread):
             )
             self.response_received.emit(chat_response.choices[0].message.content)
         except Exception as e:
-            self.error_occurred.emit(f"An error occurred: {e}")
+            self.error_occurred.emit(f"An error occurred: {e}") 
