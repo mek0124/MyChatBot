@@ -1,10 +1,42 @@
 from PySide6 import QtWidgets as qtw
 from PySide6 import QtCore as qtc
 from PySide6 import QtGui as qtg
-from PySide6 import Qt
 from datetime import datetime
 
 import markdown
+
+
+class LoadingWidget(qtw.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_ui()
+        self.start_animation()
+
+    def setup_ui(self):
+        layout = qtw.QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(qtc.Qt.AlignLeft)
+        self.setLayout(layout)
+
+        self.loading_label = qtw.QLabel("Mistral AI is thinking...")
+        self.loading_label.setStyleSheet("""
+            color: rgb(94,147,207);
+            font-style: italic;
+            font-size: 14px;
+        """)
+        layout.addWidget(self.loading_label)
+
+        self.spinner = qtw.QLabel()
+        self.spinner_movie = qtg.QMovie(":loading.gif")
+        self.spinner.setMovie(self.spinner_movie)
+        layout.addWidget(self.spinner)
+
+    def start_animation(self):
+        self.spinner_movie.start()
+
+    def stop_animation(self):
+        self.spinner_movie.stop()
+        self.hide()
 
 
 class ChatMessageWidget(qtw.QWidget):
@@ -16,51 +48,134 @@ class ChatMessageWidget(qtw.QWidget):
 
     def setup_ui(self):
         layout = qtw.QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)
         self.setLayout(layout)
 
         # Add label for sender
         sender_label = qtw.QLabel("You" if self.is_user else "Mistral AI")
-        sender_label.setAlignment(Qt.AlignLeft if self.is_user else Qt.AlignRight)
+        sender_label.setAlignment(qtc.Qt.AlignLeft if self.is_user else qtc.Qt.AlignRight)
         sender_label.setStyleSheet(
-            "font-weight: bold; color: " + ("#2c3e50" if self.is_user else "#16a085")
+            """
+            font-weight: bold;
+            font-size: 12px;
+            color: %s;
+            margin-bottom: 2px;
+            """ % ("rgb(177,203,231)" if self.is_user else "rgb(94,147,207)")
         )
         layout.addWidget(sender_label)
 
         # Create text edit for message
         self.text_edit = qtw.QTextEdit()
         self.text_edit.setReadOnly(True)
-        self.text_edit.setSizePolicy(qtw.QSizePolicy.Expanding, qtw.QSizePolicy.Fixed)
+        self.text_edit.setSizePolicy(qtw.QSizePolicy.Expanding, qtw.QSizePolicy.Preferred)
+        self.text_edit.setHorizontalScrollBarPolicy(qtc.Qt.ScrollBarAlwaysOff)
+        self.text_edit.setVerticalScrollBarPolicy(qtc.Qt.ScrollBarAlwaysOff)
         self.text_edit.setStyleSheet(
             f"""
             QTextEdit {{
-                background-color: {'#ecf0f1' if self.is_user else '#f8f9fa'};
-                border: 1px solid {'#bdc3c7' if self.is_user else '#d1d7dc'};
-                border-radius: 8px;
-                padding: 8px;
+                background-color: {'rgb(0,38,80)' if self.is_user else 'rgb(0,22,45)'};
+                border: 1px solid {'rgb(33,84,141)' if self.is_user else 'rgb(33,84,141)'};
+                border-radius: 12px;
+                padding: 12px;
+                font-size: 14px;
+                margin-bottom: 8px;
+                color: rgb(177,203,231);
             }}
             """
         )
 
         # Process markdown and set content
-        self.set_markdown_content(self.text_edit, self.message)
-        
-        # Add context menu for copy/save
-        if not self.is_user:
-            self.text_edit.setContextMenuPolicy(Qt.CustomContextMenu)
-            self.text_edit.customContextMenuRequested.connect(self.show_context_menu)
-        
+        if self.message:
+            self.set_markdown_content(self.text_edit, self.message)
         layout.addWidget(self.text_edit)
 
-    def set_markdown_content(self, text_edit: qtw.QTextEdit, markdown_text: str):
-        # Convert markdown to HTML
-        html = markdown.markdown(markdown_text)
+        # Calculate and set appropriate height
+        if self.message:
+            self.adjust_height()
+
+        # Add action buttons for AI responses
+        if not self.is_user and self.message:
+            button_layout = qtw.QHBoxLayout()
+            button_layout.setAlignment(qtc.Qt.AlignRight)
+            button_layout.setSpacing(5)
+            
+            self.copy_button = qtw.QPushButton("Copy")
+            self.copy_button.setStyleSheet("""
+                QPushButton {
+                    padding: 4px 8px;
+                    border: 1px solid rgb(33,84,141);
+                    border-radius: 4px;
+                    background-color: rgb(0,38,80);
+                    font-size: 12px;
+                    color: rgb(177,203,231);
+                }
+                QPushButton:hover {
+                    background-color: rgb(94,147,207);
+                }
+            """)
+            self.copy_button.clicked.connect(self.copy_markdown)
+            button_layout.addWidget(self.copy_button)
+            
+            self.save_md_button = qtw.QPushButton("Save MD")
+            self.save_md_button.setStyleSheet("""
+                QPushButton {
+                    padding: 4px 8px;
+                    border: 1px solid rgb(33,84,141);
+                    border-radius: 4px;
+                    background-color: rgb(0,38,80);
+                    font-size: 12px;
+                    color: rgb(177,203,231);
+                }
+                QPushButton:hover {
+                    background-color: rgb(94,147,207);
+                }
+            """)
+            self.save_md_button.clicked.connect(lambda: self.save_markdown('md'))
+            button_layout.addWidget(self.save_md_button)
+            
+            self.save_txt_button = qtw.QPushButton("Save TXT")
+            self.save_txt_button.setStyleSheet("""
+                QPushButton {
+                    padding: 4px 8px;
+                    border: 1px solid rgb(33,84,141);
+                    border-radius: 4px;
+                    background-color: rgb(0,38,80);
+                    font-size: 12px;
+                    color: rgb(177,203,231);
+                }
+                QPushButton:hover {
+                    background-color: rgb(94,147,207);
+                }
+            """)
+            self.save_txt_button.clicked.connect(lambda: self.save_markdown('txt'))
+            button_layout.addWidget(self.save_txt_button)
+            
+            layout.addLayout(button_layout)
+
+        # Keep context menu functionality
+        if not self.is_user and self.message:
+            self.text_edit.setContextMenuPolicy(qtc.Qt.CustomContextMenu)
+            self.text_edit.customContextMenuRequested.connect(self.show_context_menu)
+
+    def adjust_height(self):
+        # Calculate the ideal height based on content
+        doc = self.text_edit.document()
+        doc.setTextWidth(self.text_edit.viewport().width())
+        height = int(doc.size().height()) + 30  # Add padding
         
-        # Create a document and set HTML
+        # Set minimum and maximum heights
+        self.text_edit.setMinimumHeight(min(height, 500))  # Cap at 500px
+        self.text_edit.setMaximumHeight(min(height, 500))  # Cap at 500px
+
+    def set_markdown_content(self, text_edit: qtw.QTextEdit, markdown_text: str):
+        html = markdown.markdown(markdown_text)
         doc = qtg.QTextDocument()
         doc.setHtml(html)
-        
-        # Set the document to the text edit
         text_edit.setDocument(doc)
+        
+        # Adjust height after setting content
+        qtc.QTimer.singleShot(100, self.adjust_height)
 
     def show_context_menu(self, position):
         menu = qtw.QMenu(self)
@@ -102,3 +217,9 @@ class ChatMessageWidget(qtw.QWidget):
                 qtw.QMessageBox.information(self, "Saved", f"Content saved successfully to {file_path}")
             except Exception as e:
                 qtw.QMessageBox.critical(self, "Error", f"Failed to save file: {str(e)}")
+
+    def resizeEvent(self, event):
+        # Recalculate height when widget is resized
+        if self.message:
+            self.adjust_height()
+        super().resizeEvent(event)
