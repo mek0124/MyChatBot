@@ -1,0 +1,2 @@
+1. Separate ui from logic
+2. Separate logic to backend
