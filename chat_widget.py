@@ -2,7 +2,6 @@ from PySide6 import QtWidgets as qtw
 from PySide6 import QtCore as qtc
 from PySide6 import QtGui as qtg
 from datetime import datetime
-
 import markdown
 
 
@@ -52,7 +51,6 @@ class ChatMessageWidget(qtw.QWidget):
         layout.setSpacing(5)
         self.setLayout(layout)
 
-        # Add label for sender
         sender_label = qtw.QLabel("You" if self.is_user else "Mistral AI")
         sender_label.setAlignment(qtc.Qt.AlignLeft if self.is_user else qtc.Qt.AlignRight)
         sender_label.setStyleSheet(
@@ -65,7 +63,6 @@ class ChatMessageWidget(qtw.QWidget):
         )
         layout.addWidget(sender_label)
 
-        # Create text edit for message
         self.text_edit = qtw.QTextEdit()
         self.text_edit.setReadOnly(True)
         self.text_edit.setSizePolicy(qtw.QSizePolicy.Expanding, qtw.QSizePolicy.Preferred)
@@ -85,16 +82,13 @@ class ChatMessageWidget(qtw.QWidget):
             """
         )
 
-        # Process markdown and set content
         if self.message:
             self.set_markdown_content(self.text_edit, self.message)
         layout.addWidget(self.text_edit)
 
-        # Calculate and set appropriate height
         if self.message:
             self.adjust_height()
 
-        # Add action buttons for AI responses
         if not self.is_user and self.message:
             button_layout = qtw.QHBoxLayout()
             button_layout.setAlignment(qtc.Qt.AlignRight)
@@ -153,28 +147,22 @@ class ChatMessageWidget(qtw.QWidget):
             
             layout.addLayout(button_layout)
 
-        # Keep context menu functionality
         if not self.is_user and self.message:
             self.text_edit.setContextMenuPolicy(qtc.Qt.CustomContextMenu)
             self.text_edit.customContextMenuRequested.connect(self.show_context_menu)
 
     def adjust_height(self):
-        # Calculate the ideal height based on content
         doc = self.text_edit.document()
         doc.setTextWidth(self.text_edit.viewport().width())
-        height = int(doc.size().height()) + 30  # Add padding
-        
-        # Set minimum and maximum heights
-        self.text_edit.setMinimumHeight(min(height, 500))  # Cap at 500px
-        self.text_edit.setMaximumHeight(min(height, 500))  # Cap at 500px
+        height = int(doc.size().height()) + 30
+        self.text_edit.setMinimumHeight(min(height, 500))
+        self.text_edit.setMaximumHeight(min(height, 500))
 
     def set_markdown_content(self, text_edit: qtw.QTextEdit, markdown_text: str):
         html = markdown.markdown(markdown_text)
         doc = qtg.QTextDocument()
         doc.setHtml(html)
         text_edit.setDocument(doc)
-        
-        # Adjust height after setting content
         qtc.QTimer.singleShot(100, self.adjust_height)
 
     def show_context_menu(self, position):
@@ -219,7 +207,6 @@ class ChatMessageWidget(qtw.QWidget):
                 qtw.QMessageBox.critical(self, "Error", f"Failed to save file: {str(e)}")
 
     def resizeEvent(self, event):
-        # Recalculate height when widget is resized
         if self.message:
             self.adjust_height()
         super().resizeEvent(event)
