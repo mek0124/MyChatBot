@@ -1,7 +1,9 @@
 version: '3.8'
 
 services:
-  mychatbot:
+  chatbot:  # Changed service name from 'mychatbot' to 'chatbot'
+    container_name: mychatbot  # Explicit container name
+    image: mychatbot:latest  # Explicit image name
     build:
       context: .
       args:

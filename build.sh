@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
 
-# Cross-platform build script for MyChatBot Docker image
-
 set -euo pipefail
 
-# Get the directory containing this script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
 
-# Build using compose (preferred)
+# Build with explicit image name
 if command -v docker-compose &> /dev/null || command -v docker compose &> /dev/null; then
   cd "$PROJECT_ROOT"
   docker-compose build --no-cache
@@ -23,4 +20,4 @@ else
   exit 1
 fi
 
-echo "Build completed successfully"
+echo "Build completed successfully. Image tagged as: mychatbot:latest"
