@@ -1,23 +1,17 @@
-# .gitignore
+# .dockerignore
 
 ```
-.env
-.venv/
-__pycache__/
-chat_dataset.db
-
-```
-
-# backend/__init__.py
-
-```py
-
-```
-
-# backend/agents/__init__.py
-
-```py
-
+.git
+.gitignore
+.venv
+__pycache__
+*.db
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+codebase.md
+.env.template
 ```
 
 # backend/agents/dataset_agent.py
@@ -25,14 +19,22 @@ chat_dataset.db
 ```py
 import sqlite3
 import uuid
+import os
 from typing import Optional
 from PySide6 import QtCore as qtc
 from ..models.message import Message
 from ..models.profile import Profile
 
 class DatasetAgent:
-    def __init__(self, db_path: str = "chat_dataset.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        if db_path is None:
+            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.db_path = os.path.join(backend_dir, "chat_dataset.db")
+        else:
+            self.db_path = db_path
+            
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        
         self._init_db()
 
     def _init_db(self):
@@ -175,12 +177,6 @@ class MistralWorker(qtc.QThread):
             self.finished_signal.emit()
 ```
 
-# backend/models/__init__.py
-
-```py
-
-```
-
 # backend/models/message.py
 
 ```py
@@ -213,16 +209,181 @@ class Profile:
         self.last_used_at = last_used_at
 ```
 
-# frontend/__init__.py
+# build.sh
 
-```py
+```sh
+#!/usr/bin/env bash
 
+# Cross-platform build script for MyChatBot Docker image
+
+set -euo pipefail
+
+# Get the directory containing this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+
+# Build using compose (preferred)
+if command -v docker-compose &> /dev/null || command -v docker compose &> /dev/null; then
+  cd "$PROJECT_ROOT"
+  docker-compose build --no-cache
+elif command -v docker &> /dev/null; then
+  cd "$PROJECT_ROOT"
+  docker build -t mychatbot:latest \
+    --label "project=mychatbot" \
+    --label "maintainer=$(whoami)@$(hostname)" \
+    .
+else
+  echo "Error: Neither docker-compose nor docker command found"
+  exit 1
+fi
+
+echo "Build completed successfully"
 ```
 
-# frontend/components/__init__.py
+# cleanup.sh
 
-```py
+```sh
+#!/usr/bin/env bash
 
+# Cross-platform cleanup script for MyChatBot Docker resources
+
+set -euo pipefail
+
+# Get the directory containing this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+
+# Function to safely remove resources
+safe_remove() {
+  local filter="$1"
+  local type="$2"
+  
+  echo "Removing $type with filter: $filter"
+  if ! docker "$type" ls --filter "$filter" --format "{{.ID}}" | xargs -r docker "$type" rm -f 2>/dev/null; then
+    echo "No $type to remove"
+  fi
+}
+
+# Stop and remove containers
+if command -v docker-compose &> /dev/null || command -v docker compose &> /dev/null; then
+  cd "$PROJECT_ROOT"
+  docker-compose -f "docker-compose.yml" down || true
+fi
+
+# Remove project-specific resources
+safe_remove "label=project=mychatbot" "container"
+safe_remove "label=project=mychatbot" "image"
+safe_remove "name=mychatbot" "network"
+safe_remove "name=mychatbot" "volume"
+
+# Cleanup builder cache
+docker builder prune -f --filter "label=project=mychatbot" 2>/dev/null || true
+
+# Cleanup networks (not associated with containers)
+docker network prune -f 2>/dev/null || true
+
+echo "Cleanup complete"
+```
+
+# docker-compose.yml
+
+```yml
+version: '3.8'
+
+services:
+  mychatbot:
+    build:
+      context: .
+      args:
+        PROJECT_NAME: mychatbot
+    labels:
+      - "project=mychatbot"
+    volumes:
+      - ./.env:/app/.env
+      - ./backend:/app/backend
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+    tty: true
+    stdin_open: true
+```
+
+# dockerfile
+
+```
+# Stage 1: Builder
+FROM python:3.10-slim AS builder
+
+# Set project metadata
+ARG PROJECT_NAME=mychatbot
+LABEL project=$PROJECT_NAME \
+      maintainer="your@email.com" \
+      version="1.0.0"
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Stage 2: Runtime
+FROM python:3.10-slim
+
+# Copy project metadata
+ARG PROJECT_NAME=mychatbot
+LABEL project=$PROJECT_NAME \
+      maintainer="your@email.com" \
+      version="1.0.0"
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libgl1 \
+    libglib2.0-0 \
+    libxkbcommon-x11-0 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-randr0 \
+    libxcb-render-util0 \
+    libxcb-shape0 \
+    libxcb-xfixes0 \
+    libxcb-xinerama0 \
+    libxkbcommon0 \
+    libegl1 \
+    libxcb1 \
+    libx11-xcb1 \
+    libx11-6 \
+    libfontconfig1 \
+    libdbus-1-3 \
+    libxcb-cursor0 \
+    libglx0 \
+    libgl1-mesa-glx \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy application code
+COPY . .
+
+# Create directory for the database
+RUN mkdir -p /app/backend
+
+# Environment variables
+ENV PYTHONPATH=/app
+ENV QT_DEBUG_PLUGINS=1
+ENV QT_X11_NO_MITSHM=1
+
+# Run the application
+CMD ["python", "main.py"]
 ```
 
 # frontend/components/chat_message.py
@@ -448,12 +609,6 @@ class LoadingWidget(qtw.QWidget):
         self.hide()
 ```
 
-# frontend/controllers/__init__.py
-
-```py
-
-```
-
 # frontend/controllers/main_controller.py
 
 ```py
@@ -467,6 +622,14 @@ from backend.models.message import Message
 from backend.models.profile import Profile
 
 class MainController(qtc.QObject):
+    display_user_message = qtc.Signal(str)
+    display_ai_message = qtc.Signal(str)
+
+    show_loading = qtc.Signal()
+    hide_loading = qtc.Signal()
+
+    error_occurred = qtc.Signal(str)
+
     def __init__(self):
         super().__init__()
         self.conversation_id = str(uuid.uuid4())
@@ -504,6 +667,8 @@ class MainController(qtc.QObject):
     def send_message(self, message_text: str):
         if not message_text or not self.user_profile:
             return
+        
+        self.display_user_message.emit(message_text)
             
         # Create message object
         message = Message(
@@ -515,6 +680,8 @@ class MainController(qtc.QObject):
         # Log the message
         self.log_message(message)
         
+        self.show_loading.emit()
+
         # Send to Mistral
         self.send_to_mistral(message_text)
 
@@ -527,6 +694,10 @@ class MainController(qtc.QObject):
         worker.start()
 
     def handle_response(self, response: str):
+        self.hide_loading.emit()
+
+        self.display_ai_message.emit(response)
+
         if not self.ai_profile:
             return
             
@@ -541,7 +712,8 @@ class MainController(qtc.QObject):
         self.log_message(message)
 
     def handle_error(self, error: str):
-        print(f"Error from Mistral: {error}")
+        self.hide_loading.emit()
+        self.error_occurred.emit(error)
 
     def log_message(self, message: Message):
         worker = DatasetAgentWorker(message=message)
@@ -576,21 +748,11 @@ class MainController(qtc.QObject):
         self.worker_threads = [t for t in self.worker_threads if t.isRunning()]
 ```
 
-# frontend/views/__init__.py
-
-```py
-
-```
-
 # frontend/views/main_window.py
 
 ```py
 from PySide6 import QtWidgets as qtw
 from PySide6 import QtCore as qtc
-from PySide6 import QtGui as qtg
-from pathlib import Path
-import base64
-import uuid
 from ..components.chat_message import ChatMessageWidget
 from ..components.loading_widget import LoadingWidget
 
@@ -736,6 +898,7 @@ class MainWindow(qtw.QMainWindow):
         message = self.input_text.toPlainText().strip()
         if message:
             self.controller.send_message(message)
+            self.input_text.clear()
 
     def on_attach_file(self):
         file_path, _ = qtw.QFileDialog.getOpenFileName(
@@ -797,6 +960,32 @@ class MainWindow(qtw.QMainWindow):
         event.accept()
 ```
 
+# LICENSE.txt
+
+```txt
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+```
+
 # main.py
 
 ```py
@@ -813,19 +1002,161 @@ def main():
     controller = MainController()
     window = MainWindow(controller)
     
-    # Connect controller to view
-    controller.response_received = window.add_message
-    controller.error_occurred = window.add_message
-    controller.show_loading = window.show_loading_indicator
-    controller.hide_loading = window.hide_loading_indicator
-    controller.clear_input = window.clear_input
-    controller.show_status = window.show_status_message
+    # Connect controller signals to view methods
+    controller.display_user_message.connect(
+        lambda msg: window.add_message(msg, is_user=True))
+    controller.display_ai_message.connect(
+        lambda msg: window.add_message(msg, is_user=False))
+    controller.show_loading.connect(window.show_loading_indicator)
+    controller.hide_loading.connect(window.hide_loading_indicator)
+    controller.error_occurred.connect(
+        lambda error: window.add_message(error, is_user=False))
     
     window.show()
     app.exec()
 
 if __name__ == "__main__":
     main()
+```
+
+# README.md
+
+```md
+# MyChatBot
+
+Welcome to MyChatBot. A PySide6-based application that uses Mistal AI API for users to send messages, attach files and images, and view responses from the Mistrl AI. This project was not hand written by me. This project serves as my first attempt at AI prompting. I elected to do something small with interacting with the AI and creating a raw, unsanitized dataset from those interactions. Each dataset is saved to a relational database on your system as I support user privacy. You may do with these datasets as you please. These prompts are done using DeekSeek and ChatGPT. It's for me to obtain an idea of how I'm going to build my model.
+
+Total Prompts: 
+23- deepseek
+
+each "prompt" is considered an input message from me with/without files/images attached
+
+## Features
+
+- **User Interface**: A clean and intuitive chat interface built with PySide6.
+- **Message Logging**: Messages are logged into an SQLite database.
+- **File and Image Attachments**: Users can attach and send files and images.
+- **Markdown Support**: Messages can be formatted using Markdown.
+- **Concurrency**: Uses QThread for background tasks to keep the UI responsive.
+
+## Project Structure
+
+\`\`\`
+.
+├── .env
+├── .gitignore
+├── chat_dataset.db
+├── chat_widget.py
+├── dataset_agent.py
+├── main.py
+├── mistral_agent.py
+├── requirements.txt
+└── README.md
+\`\`\`
+
+## Prerequisites
+
+- Python 3.x
+
+## Installation
+
+1. Clone the repository:
+
+    \`\`\`sh
+    git clone https://github.com/mek0124/MyChatBot
+    cd MyChatBot
+    \`\`\`
+
+2. Create a virtual environment and activate it:
+
+    \`\`\`sh
+    python -m venv .venv
+    source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
+    \`\`\`
+
+3. Install the required dependencies:
+
+    \`\`\`sh
+    pip install -r requirements.txt
+    \`\`\`
+
+4. Set up the environment variables by creating a `.env` file in the project root:
+
+    \`\`\`ini
+    MISTRAL_API_KEY=your_mistral_api_key_here # do not encase in double quotes!
+    \`\`\`
+
+## Running the Application
+
+To run the application, execute the following command:
+
+\`\`\`sh
+python main.py
+
+# python3 main.py if on linux/mac
+\`\`\`
+
+## Codebase Overview
+
+### `.gitignore`
+
+Specifies files and directories to be ignored by Git.
+
+### `chat_dataset.db`
+
+> .gitignored by default
+
+A binary file containing the SQLite database used to store chat profiles and messages.
+
+### `chat_widget.py`
+
+Contains the custom PySide6 widgets used in the chat interface:
+
+- **LoadingWidget**: Displays a loading animation.
+- **ChatMessageWidget**: Displays chat messages with Markdown support and options to copy or save messages.
+
+### `dataset_agent.py`
+
+Handles interactions with the SQLite database:
+
+- **DatasetAgent**: Manages database operations for profiles and messages.
+- **DatasetAgentWorker**: A QThread for performing database operations in the background.
+
+### `main.py`
+
+The main entry point of the application:
+
+- **MainWindow**: The main window class that sets up the UI and handles user interactions.
+- Initializes profiles for the user and AI.
+- Manages sending messages and handling responses.
+
+### `mistral_agent.py`
+
+Handles interactions with the Mistral AI API:
+
+- **MistralWorker**: A QThread for sending messages to the Mistral AI API and receiving responses.
+
+### `requirements.txt`
+
+Lists the Python dependencies required to run the application.
+
+## Contributing
+
+1. Fork the repository.
+2. Create a new branch (`git checkout -b feature-branch`).
+3. Commit your changes (`git commit -am 'Add some feature'`).
+4. Push to the branch (`git push origin feature-branch`).
+5. Create a new Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- Thanks to the Mistral AI team for providing the API.
+- Thanks to the PySide6 community for their excellent UI framework.
+
 ```
 
 # requirements.txt
@@ -856,5 +1187,56 @@ typing-extensions==4.13.2
 typing-inspection==0.4.0
 uv==0.7.5
 uvloop==0.21.0
+```
+
+# run.sh
+
+```sh
+#!/usr/bin/env bash
+
+# Cross-platform run script for MyChatBot
+
+set -euo pipefail
+
+# Get the directory containing this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+
+# Detect OS and handle X11 forwarding
+case "$(uname -s)" in
+  Linux*)
+    xhost +local:root >/dev/null 2>&1 || true
+    X11_ARGS=(-e "DISPLAY=$DISPLAY" -v "/tmp/.X11-unix:/tmp/.X11-unix")
+    ;;
+  Darwin*)
+    xhost +localhost >/dev/null 2>&1 || true
+    X11_ARGS=(-e "DISPLAY=host.docker.internal:0" -v "/tmp/.X11-unix:/tmp/.X11-unix")
+    ;;
+  *)
+    X11_ARGS=()
+    ;;
+esac
+
+# Run using compose (preferred)
+if command -v docker-compose &> /dev/null || command -v docker compose &> /dev/null; then
+  cd "$PROJECT_ROOT"
+  docker-compose -f "docker-compose.yml" up
+elif command -v docker &> /dev/null; then
+  docker run -it --rm \
+    "${X11_ARGS[@]}" \
+    -v "$PROJECT_ROOT/.env:/app/.env" \
+    -v "$PROJECT_ROOT/backend:/app/backend" \
+    --name mychatbot \
+    mychatbot:latest
+else
+  echo "Error: Neither docker-compose nor docker command found"
+  exit 1
+fi
+
+# Cleanup X11 access
+case "$(uname -s)" in
+  Linux*) xhost -local:root >/dev/null 2>&1 || true ;;
+  Darwin*) xhost -localhost >/dev/null 2>&1 || true ;;
+esac
 ```
 
