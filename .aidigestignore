@@ -2,3 +2,7 @@
 .venv/
 __pycache__/
 codebase.md
+LICENSE.txt
+README.md
+TODO.txt
+chat_dataset.db
