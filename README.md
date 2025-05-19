@@ -1,134 +1,78 @@
 # MyChatBot
 
-Welcome to MyChatBot. A PySide6-based application that uses Mistal AI API for users to send messages, attach files and images, and view responses from the Mistrl AI. This project was not hand written by me. This project serves as my first attempt at AI prompting. I elected to do something small with interacting with the AI and creating a raw, unsanitized dataset from those interactions. Each dataset is saved to a relational database on your system as I support user privacy. You may do with these datasets as you please. These prompts are done using DeekSeek and ChatGPT. It's for me to obtain an idea of how I'm going to build my model.
+Welcome to MyChatBot. A PySide6-based application that uses Mistal AI API for users to send messages, attach files and images, and view responses from the Mistrl AI. This project was not hand written by me. This project serves as my first attempt at AI prompting. I elected to do something small with interacting with the AI and creating a raw, unsanitized dataset from those interactions. Each dataset is saved to a relational database on your system as I support user privacy. You may do with these datasets as you please. These prompts are done using DeekSeek and ChatGPT. It's for me to obtain an idea of how I'm going to build my model. This application took approximately 50 prompts to get finalized to this first working version.
 
-Total Prompts: 
-23- deepseek
+## Docker Setup
 
-each "prompt" is considered an input message from me with/without files/images attached
+The application is now Dockerized for easier deployment and cross-platform compatibility.
+
+### Prerequisites
+- Docker Engine
+- Docker Compose
+- X11 server (for GUI on Linux/macOS)
+
+### Project Structure
+
+```
+MyChatBot/
+├── backend/ # Database and AI backend
+├── frontend/ # GUI components
+├── .env # Environment variables
+├── Dockerfile # Docker configuration
+├── docker-compose.yml # Service definition
+├── build.sh # Build script
+├── run.sh # Run script
+└── cleanup.sh # Cleanup script
+```
+
+
+## Quick Start
+
+1. **Build the container**:
+    ```bash
+    chmod +x *.sh && ./build.sh
+    ```
+2. **Run the application**:
+    ```bash
+    ./run.sh
+    ```
+3. Clean up when done:
+    ```bash
+    ./cleanup.sh
+    ```
+
+## Script Details
+
+- build.sh: Builds the Docker image with all dependencies
+
+- run.sh: Starts the application with proper X11 forwarding
+
+- cleanup.sh: Removes all project-specific Docker resources
 
 ## Features
 
-- **User Interface**: A clean and intuitive chat interface built with PySide6.
-- **Message Logging**: Messages are logged into an SQLite database.
-- **File and Image Attachments**: Users can attach and send files and images.
-- **Markdown Support**: Messages can be formatted using Markdown.
-- **Concurrency**: Uses QThread for background tasks to keep the UI responsive.
+- Chat Interface: Send messages and receive AI responses
 
-## Project Structure
+- File Attachments: Analyze text files and images
 
-```
-.
-├── .env
-├── .gitignore
-├── chat_dataset.db
-├── chat_widget.py
-├── dataset_agent.py
-├── main.py
-├── mistral_agent.py
-├── requirements.txt
-└── README.md
-```
+- Data Collection: All interactions are stored in SQLite
 
-## Prerequisites
+- Markdown Support: View formatted responses
 
-- Python 3.x
+- Cross-Platform: Runs on Linux, macOS, and Windows (WSL)
 
-## Installation
+## Development Notes
 
-1. Clone the repository:
+This project was developed through AI collaboration, with the Docker implementation being particularly challenging to configure correctly for cross-platform GUI support. The final solution includes:
 
-    ```sh
-    git clone https://github.com/mek0124/MyChatBot
-    cd MyChatBot
-    ```
+- Multi-stage Docker builds
 
-2. Create a virtual environment and activate it:
+- Automatic X11 forwarding
 
-    ```sh
-    python -m venv .venv
-    source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
-    ```
+- Isolated data storage
 
-3. Install the required dependencies:
-
-    ```sh
-    pip install -r requirements.txt
-    ```
-
-4. Set up the environment variables by creating a `.env` file in the project root:
-
-    ```ini
-    MISTRAL_API_KEY=your_mistral_api_key_here # do not encase in double quotes!
-    ```
-
-## Running the Application
-
-To run the application, execute the following command:
-
-```sh
-python main.py
-
-# python3 main.py if on linux/mac
-```
-
-## Codebase Overview
-
-### `.gitignore`
-
-Specifies files and directories to be ignored by Git.
-
-### `chat_dataset.db`
-
-> .gitignored by default
-
-A binary file containing the SQLite database used to store chat profiles and messages.
-
-### `chat_widget.py`
-
-Contains the custom PySide6 widgets used in the chat interface:
-
-- **LoadingWidget**: Displays a loading animation.
-- **ChatMessageWidget**: Displays chat messages with Markdown support and options to copy or save messages.
-
-### `dataset_agent.py`
-
-Handles interactions with the SQLite database:
-
-- **DatasetAgent**: Manages database operations for profiles and messages.
-- **DatasetAgentWorker**: A QThread for performing database operations in the background.
-
-### `main.py`
-
-The main entry point of the application:
-
-- **MainWindow**: The main window class that sets up the UI and handles user interactions.
-- Initializes profiles for the user and AI.
-- Manages sending messages and handling responses.
-
-### `mistral_agent.py`
-
-Handles interactions with the Mistral AI API:
-
-- **MistralWorker**: A QThread for sending messages to the Mistral AI API and receiving responses.
-
-### `requirements.txt`
-
-Lists the Python dependencies required to run the application.
-
-## Contributing
-
-1. Fork the repository.
-2. Create a new branch (`git checkout -b feature-branch`).
-3. Commit your changes (`git commit -am 'Add some feature'`).
-4. Push to the branch (`git push origin feature-branch`).
-5. Create a new Pull Request.
+- Clean resource management
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Thanks to the Mistral AI team for providing the API.
-- Thanks to the PySide6 community for their excellent UI framework.
+MIT License - see [LICENSE.txt](https://github.com/mek0124/MyChatBot/LICENSE.txt) for details.
