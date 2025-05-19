@@ -1,8 +1,8 @@
-.env
-.venv/
+.venv
 __pycache__/
-codebase.md
-LICENSE.txt
-README.md
-TODO.txt
+__init__.py
 chat_dataset.db
+.env
+.env.template
+.gitignore
+codebase.md
