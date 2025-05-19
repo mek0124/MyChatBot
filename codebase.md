@@ -8,11 +8,224 @@ chat_dataset.db
 
 ```
 
-# chat_dataset.db
+# backend/__init__.py
 
-This is a binary file of the type: Binary
+```py
 
-# chat_widget.py
+```
+
+# backend/agents/__init__.py
+
+```py
+
+```
+
+# backend/agents/dataset_agent.py
+
+```py
+import sqlite3
+import uuid
+from typing import Optional
+from PySide6 import QtCore as qtc
+from ..models.message import Message
+from ..models.profile import Profile
+
+class DatasetAgent:
+    def __init__(self, db_path: str = "chat_dataset.db"):
+        self.db_path = db_path
+        self._init_db()
+
+    def _init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS profiles (
+                    id TEXT PRIMARY KEY,
+                    entity_type TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_used_at TIMESTAMP
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id TEXT NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(sender_id) REFERENCES profiles(id)
+                )
+            """)
+            conn.commit()
+
+    def get_or_create_profile(self, entity_type: str) -> Profile:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id, created_at, last_used_at FROM profiles 
+                WHERE entity_type = ?
+                ORDER BY last_used_at DESC
+                LIMIT 1
+            """, (entity_type,))
+            result = cursor.fetchone()
+            
+            if result:
+                profile = Profile(
+                    id=result[0],
+                    entity_type=entity_type,
+                    created_at=result[1],
+                    last_used_at=result[2]
+                )
+                cursor.execute("""
+                    UPDATE profiles 
+                    SET last_used_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (profile.id,))
+            else:
+                profile = Profile(
+                    id=str(uuid.uuid4()),
+                    entity_type=entity_type
+                )
+                cursor.execute("""
+                    INSERT INTO profiles (id, entity_type)
+                    VALUES (?, ?)
+                """, (profile.id, profile.entity_type))
+            
+            conn.commit()
+            return profile
+
+    def log_message(self, message: Message):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO messages (conversation_id, sender_id, content)
+                VALUES (?, ?, ?)
+            """, (message.conversation_id, message.sender_id, message.content))
+            conn.commit()
+
+class DatasetAgentWorker(qtc.QThread):
+    profile_ready = qtc.Signal(Profile)
+    logging_complete = qtc.Signal(bool)
+    error_occurred = qtc.Signal(str)
+    finished_signal = qtc.Signal()
+
+    def __init__(self, entity_type: Optional[str] = None, 
+                 message: Optional[Message] = None,
+                 parent=None):
+        super().__init__(parent)
+        self.entity_type = entity_type
+        self.message = message
+        self.mode = 'get_profile' if entity_type else 'log_message'
+
+    def run(self):
+        try:
+            agent = DatasetAgent()
+            if self.mode == 'get_profile':
+                profile = agent.get_or_create_profile(self.entity_type)
+                self.profile_ready.emit(profile)
+            else:
+                agent.log_message(self.message)
+                self.logging_complete.emit(True)
+        except Exception as e:
+            self.error_occurred.emit(f"Dataset error: {str(e)}")
+        finally:
+            self.finished_signal.emit()
+```
+
+# backend/agents/mistral_agent.py
+
+```py
+import os
+from PySide6 import QtCore as qtc
+from mistralai import Mistral
+
+class MistralWorker(qtc.QThread):
+    response_received = qtc.Signal(str)
+    error_occurred = qtc.Signal(str)
+    finished_signal = qtc.Signal()
+
+    def __init__(self, prompt: str, parent=None):
+        super().__init__(parent)
+        self.prompt = prompt
+
+    def run(self):
+        try:
+            api_key = os.environ.get("MISTRAL_API_KEY")
+            
+            if not api_key:
+                self.error_occurred.emit("Error: MISTRAL_API_KEY not found in environment variables.")
+                return
+
+            model = "mistral-large-latest"
+            client = Mistral(api_key=api_key)
+
+            messages = [{"role": "user", "content": self.prompt}]
+
+            chat_response = client.chat.complete(
+                model=model,
+                messages=messages,
+            )
+            self.response_received.emit(chat_response.choices[0].message.content)
+        except Exception as e:
+            self.error_occurred.emit(f"An error occurred: {e}")
+        finally:
+            self.finished_signal.emit()
+```
+
+# backend/models/__init__.py
+
+```py
+
+```
+
+# backend/models/message.py
+
+```py
+from datetime import datetime
+from typing import Optional
+
+class Message:
+    def __init__(self, conversation_id: str, sender_id: str, content: str, 
+                 created_at: Optional[datetime] = None, id: Optional[int] = None):
+        self.id = id
+        self.conversation_id = conversation_id
+        self.sender_id = sender_id
+        self.content = content
+        self.created_at = created_at if created_at else datetime.now()
+```
+
+# backend/models/profile.py
+
+```py
+from datetime import datetime
+from typing import Optional
+
+class Profile:
+    def __init__(self, entity_type: str, id: Optional[str] = None, 
+                 created_at: Optional[datetime] = None, 
+                 last_used_at: Optional[datetime] = None):
+        self.id = id
+        self.entity_type = entity_type
+        self.created_at = created_at if created_at else datetime.now()
+        self.last_used_at = last_used_at
+```
+
+# frontend/__init__.py
+
+```py
+
+```
+
+# frontend/components/__init__.py
+
+```py
+
+```
+
+# frontend/components/chat_message.py
 
 ```py
 from PySide6 import QtWidgets as qtw
@@ -20,40 +233,6 @@ from PySide6 import QtCore as qtc
 from PySide6 import QtGui as qtg
 from datetime import datetime
 import markdown
-
-
-class LoadingWidget(qtw.QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setup_ui()
-        self.start_animation()
-
-    def setup_ui(self):
-        layout = qtw.QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(qtc.Qt.AlignLeft)
-        self.setLayout(layout)
-
-        self.loading_label = qtw.QLabel("Mistral AI is thinking...")
-        self.loading_label.setStyleSheet("""
-            color: rgb(94,147,207);
-            font-style: italic;
-            font-size: 14px;
-        """)
-        layout.addWidget(self.loading_label)
-
-        self.spinner = qtw.QLabel()
-        self.spinner_movie = qtg.QMovie(":loading.gif")
-        self.spinner.setMovie(self.spinner_movie)
-        layout.addWidget(self.spinner)
-
-    def start_animation(self):
-        self.spinner_movie.start()
-
-    def stop_animation(self):
-        self.spinner_movie.stop()
-        self.hide()
-
 
 class ChatMessageWidget(qtw.QWidget):
     def __init__(self, message: str, is_user: bool, parent=None):
@@ -229,203 +408,77 @@ class ChatMessageWidget(qtw.QWidget):
         super().resizeEvent(event)
 ```
 
-# dataset_agent.py
-
-```py
-from PySide6 import QtCore as qtc
-import sqlite3
-import uuid
-from typing import Optional
-
-
-class DatasetAgent:
-    def __init__(self):
-        self.db_path = "chat_dataset.db"
-        self._init_db()
-
-    def _init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS profiles (
-                    id TEXT PRIMARY KEY,
-                    entity_type TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_used_at TIMESTAMP
-                )
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    conversation_id TEXT NOT NULL,
-                    sender_id TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(sender_id) REFERENCES profiles(id)
-                )
-            """)
-            conn.commit()
-
-    def get_or_create_profile(self, entity_type: str) -> str:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT id FROM profiles 
-                WHERE entity_type = ?
-                ORDER BY last_used_at DESC
-                LIMIT 1
-            """, (entity_type,))
-            result = cursor.fetchone()
-            
-            if result:
-                profile_id = result[0]
-                cursor.execute("""
-                    UPDATE profiles 
-                    SET last_used_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (profile_id,))
-            else:
-                profile_id = str(uuid.uuid4())
-                cursor.execute("""
-                    INSERT INTO profiles (id, entity_type)
-                    VALUES (?, ?)
-                """, (profile_id, entity_type))
-            
-            conn.commit()
-            return profile_id
-
-    def log_message(self, conversation_id: str, sender_id: str, content: str):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO messages (conversation_id, sender_id, content)
-                VALUES (?, ?, ?)
-            """, (conversation_id, sender_id, content))
-            conn.commit()
-
-
-class DatasetAgentWorker(qtc.QThread):
-    profile_ready = qtc.Signal(str)
-    logging_complete = qtc.Signal(bool)
-    error_occurred = qtc.Signal(str)
-    finished_signal = qtc.Signal()
-
-    def __init__(self, entity_type: Optional[str] = None, 
-                 conversation_id: Optional[str] = None,
-                 sender_id: Optional[str] = None,
-                 content: Optional[str] = None,
-                 parent=None):
-        super().__init__(parent)
-        self.entity_type = entity_type
-        self.conversation_id = conversation_id
-        self.sender_id = sender_id
-        self.content = content
-        self.mode = 'get_profile' if entity_type else 'log_message'
-
-    def run(self):
-        try:
-            agent = DatasetAgent()
-            if self.mode == 'get_profile':
-                profile_id = agent.get_or_create_profile(self.entity_type)
-                self.profile_ready.emit(profile_id)
-            else:
-                agent.log_message(
-                    conversation_id=self.conversation_id,
-                    sender_id=self.sender_id,
-                    content=self.content
-                )
-                self.logging_complete.emit(True)
-        except Exception as e:
-            self.error_occurred.emit(f"Dataset error: {str(e)}")
-        finally:
-            self.finished_signal.emit()
-```
-
-# main.py
+# frontend/components/loading_widget.py
 
 ```py
 from PySide6 import QtWidgets as qtw
 from PySide6 import QtCore as qtc
 from PySide6 import QtGui as qtg
-from dotenv import load_dotenv
+
+class LoadingWidget(qtw.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_ui()
+        self.start_animation()
+
+    def setup_ui(self):
+        layout = qtw.QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(qtc.Qt.AlignLeft)
+        self.setLayout(layout)
+
+        self.loading_label = qtw.QLabel("Mistral AI is thinking...")
+        self.loading_label.setStyleSheet("""
+            color: rgb(94,147,207);
+            font-style: italic;
+            font-size: 14px;
+        """)
+        layout.addWidget(self.loading_label)
+
+        self.spinner = qtw.QLabel()
+        self.spinner_movie = qtg.QMovie(":loading.gif")
+        self.spinner.setMovie(self.spinner_movie)
+        layout.addWidget(self.spinner)
+
+    def start_animation(self):
+        self.spinner_movie.start()
+
+    def stop_animation(self):
+        self.spinner_movie.stop()
+        self.hide()
+```
+
+# frontend/controllers/__init__.py
+
+```py
+
+```
+
+# frontend/controllers/main_controller.py
+
+```py
+from PySide6 import QtCore as qtc
 from pathlib import Path
-from chat_widget import ChatMessageWidget, LoadingWidget
-from mistral_agent import MistralWorker
-from dataset_agent import DatasetAgentWorker
 import base64
 import uuid
+from backend.agents.mistral_agent import MistralWorker
+from backend.agents.dataset_agent import DatasetAgentWorker
+from backend.models.message import Message
+from backend.models.profile import Profile
 
-load_dotenv()
-
-class MainWindow(qtw.QMainWindow):
+class MainController(qtc.QObject):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Mistral AI Chat")
-        self.setGeometry(100, 100, 800, 600)
         self.conversation_id = str(uuid.uuid4())
-        self.user_id = None
-        self.ai_id = None
+        self.user_profile = None
+        self.ai_profile = None
         self.worker_threads = []
         
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: rgb(0,22,45);
-            }
-            QScrollArea {
-                border: none;
-                background-color: rgb(0,38,80);
-            }
-            QTextEdit, QTextEdit:focus {
-                border: 1px solid rgb(33,84,141);
-                border-radius: 8px;
-                padding: 8px;
-                background-color: rgb(0,38,80);
-                color: rgb(177,203,231);
-                font-size: 14px;
-                selection-background-color: rgb(33,84,141);
-                selection-color: rgb(177,203,231);
-            }
-            QPushButton {
-                background-color: rgb(33,84,141);
-                color: rgb(177,203,231);
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: rgb(94,147,207);
-            }
-            QPushButton:pressed {
-                background-color: rgb(33,84,141);
-            }
-            QMenu {
-                background-color: rgb(0,38,80);
-                border: 1px solid rgb(33,84,141);
-                color: rgb(177,203,231);
-            }
-            QMenu::item:selected {
-                background-color: rgb(94,147,207);
-            }
-            QMessageBox {
-                background-color: rgb(0,38,80);
-            }
-            QMessageBox QLabel {
-                color: rgb(177,203,231);
-            }
-        """)
-        
-        self.setup_ui()
-        self.worker_thread = None
-        self.loading_widget = None
         self.init_profiles()
 
     def init_profiles(self):
         user_worker = DatasetAgentWorker(entity_type='user')
-        user_worker.profile_ready.connect(self.set_user_id)
+        user_worker.profile_ready.connect(self.set_user_profile)
         user_worker.error_occurred.connect(
             lambda e: print(f"Error getting user profile: {e}"))
         user_worker.finished_signal.connect(self.cleanup_thread)
@@ -433,21 +486,126 @@ class MainWindow(qtw.QMainWindow):
         user_worker.start()
         
         ai_worker = DatasetAgentWorker(entity_type='ai')
-        ai_worker.profile_ready.connect(self.set_ai_id)
+        ai_worker.profile_ready.connect(self.set_ai_profile)
         ai_worker.error_occurred.connect(
             lambda e: print(f"Error getting AI profile: {e}"))
         ai_worker.finished_signal.connect(self.cleanup_thread)
         self.worker_threads.append(ai_worker)
         ai_worker.start()
 
-    def set_user_id(self, user_id: str):
-        self.user_id = user_id
-        print(f"User ID set: {user_id}")
+    def set_user_profile(self, profile: Profile):
+        self.user_profile = profile
+        print(f"User profile set: {profile.id}")
 
-    def set_ai_id(self, ai_id: str):
-        self.ai_id = ai_id
-        print(f"AI ID set: {ai_id}")
+    def set_ai_profile(self, profile: Profile):
+        self.ai_profile = profile
+        print(f"AI profile set: {profile.id}")
 
+    def send_message(self, message_text: str):
+        if not message_text or not self.user_profile:
+            return
+            
+        # Create message object
+        message = Message(
+            conversation_id=self.conversation_id,
+            sender_id=self.user_profile.id,
+            content=message_text
+        )
+        
+        # Log the message
+        self.log_message(message)
+        
+        # Send to Mistral
+        self.send_to_mistral(message_text)
+
+    def send_to_mistral(self, prompt: str):
+        worker = MistralWorker(prompt)
+        worker.response_received.connect(self.handle_response)
+        worker.error_occurred.connect(self.handle_error)
+        worker.finished_signal.connect(self.cleanup_thread)
+        self.worker_threads.append(worker)
+        worker.start()
+
+    def handle_response(self, response: str):
+        if not self.ai_profile:
+            return
+            
+        # Create message object for AI response
+        message = Message(
+            conversation_id=self.conversation_id,
+            sender_id=self.ai_profile.id,
+            content=response
+        )
+        
+        # Log the message
+        self.log_message(message)
+
+    def handle_error(self, error: str):
+        print(f"Error from Mistral: {error}")
+
+    def log_message(self, message: Message):
+        worker = DatasetAgentWorker(message=message)
+        worker.logging_complete.connect(
+            lambda success: print("Message logged" if success else "Failed to log message"))
+        worker.error_occurred.connect(
+            lambda error: print(f"Error logging message: {error}"))
+        worker.finished_signal.connect(self.cleanup_thread)
+        self.worker_threads.append(worker)
+        worker.start()
+
+    def attach_file(self, file_path: str):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                content = file.read()
+                filename = Path(file_path).name
+                return f"Here is the content of file '{filename}':\n\n{content}\n\nPlease analyze this file."
+        except Exception as e:
+            return f"Error reading file: {str(e)}"
+
+    def attach_image(self, image_path: str):
+        try:
+            with open(image_path, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+            
+            filename = Path(image_path).name
+            return f"Here is an image named '{filename}' (base64 encoded):\n\n{encoded_string}\n\nPlease analyze this image."
+        except Exception as e:
+            return f"Error processing image: {str(e)}"
+
+    def cleanup_thread(self):
+        self.worker_threads = [t for t in self.worker_threads if t.isRunning()]
+```
+
+# frontend/views/__init__.py
+
+```py
+
+```
+
+# frontend/views/main_window.py
+
+```py
+from PySide6 import QtWidgets as qtw
+from PySide6 import QtCore as qtc
+from PySide6 import QtGui as qtg
+from pathlib import Path
+import base64
+import uuid
+from ..components.chat_message import ChatMessageWidget
+from ..components.loading_widget import LoadingWidget
+
+class MainWindow(qtw.QMainWindow):
+    def __init__(self, controller):
+        super().__init__()
+        self.controller = controller
+        self.setWindowTitle("Mistral AI Chat")
+        self.setGeometry(100, 100, 800, 600)
+        self.worker_threads = []
+        self.loading_widget = None
+        
+        self.setup_ui()
+        self.setup_styles()
+        
     def setup_ui(self):
         central_widget = qtw.QWidget()
         self.setCentralWidget(central_widget)
@@ -521,9 +679,79 @@ class MainWindow(qtw.QMainWindow):
             }
         """)
 
-        self.send_button.clicked.connect(self.send_message)
-        self.file_button.clicked.connect(self.attach_file)
-        self.image_button.clicked.connect(self.attach_image)
+        self.send_button.clicked.connect(self.on_send_clicked)
+        self.file_button.clicked.connect(self.on_attach_file)
+        self.image_button.clicked.connect(self.on_attach_image)
+
+    def setup_styles(self):
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: rgb(0,22,45);
+            }
+            QScrollArea {
+                border: none;
+                background-color: rgb(0,38,80);
+            }
+            QTextEdit, QTextEdit:focus {
+                border: 1px solid rgb(33,84,141);
+                border-radius: 8px;
+                padding: 8px;
+                background-color: rgb(0,38,80);
+                color: rgb(177,203,231);
+                font-size: 14px;
+                selection-background-color: rgb(33,84,141);
+                selection-color: rgb(177,203,231);
+            }
+            QPushButton {
+                background-color: rgb(33,84,141);
+                color: rgb(177,203,231);
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: rgb(94,147,207);
+            }
+            QPushButton:pressed {
+                background-color: rgb(33,84,141);
+            }
+            QMenu {
+                background-color: rgb(0,38,80);
+                border: 1px solid rgb(33,84,141);
+                color: rgb(177,203,231);
+            }
+            QMenu::item:selected {
+                background-color: rgb(94,147,207);
+            }
+            QMessageBox {
+                background-color: rgb(0,38,80);
+            }
+            QMessageBox QLabel {
+                color: rgb(177,203,231);
+            }
+        """)
+
+    def on_send_clicked(self):
+        message = self.input_text.toPlainText().strip()
+        if message:
+            self.controller.send_message(message)
+
+    def on_attach_file(self):
+        file_path, _ = qtw.QFileDialog.getOpenFileName(
+            self, "Select File", "", "All Files (*)"
+        )
+        
+        if file_path:
+            self.controller.attach_file(file_path)
+
+    def on_attach_image(self):
+        image_path, _ = qtw.QFileDialog.getOpenFileName(
+            self, "Select Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp *.gif)"
+        )
+        
+        if image_path:
+            self.controller.attach_image(image_path)
 
     def add_message(self, message: str, is_user: bool):
         message_widget = ChatMessageWidget(message, is_user)
@@ -555,53 +783,11 @@ class MainWindow(qtw.QMainWindow):
             self.scroll_area.verticalScrollBar().maximum()
         )
 
-    def send_message(self):
-        message = self.input_text.toPlainText().strip()
-        if not message or not self.user_id or not self.ai_id:
-            return
-            
-        self.add_message(message, is_user=True)
+    def clear_input(self):
         self.input_text.clear()
-        
-        self.log_message(message, self.user_id)
-        
-        self.show_loading_indicator()
-        
-        self.worker_thread = MistralWorker(message)
-        self.worker_thread.response_received.connect(self.handle_response)
-        self.worker_thread.error_occurred.connect(self.handle_error)
-        self.worker_thread.finished_signal.connect(self.cleanup_thread)
-        self.worker_threads.append(self.worker_thread)
-        self.worker_thread.start()
 
-    def handle_response(self, response: str):
-        self.hide_loading_indicator()
-        self.add_message(response, is_user=False)
-        self.statusBar().showMessage("Response received", 3000)
-        if self.ai_id:
-            self.log_message(response, self.ai_id)
-
-    def handle_error(self, error: str):
-        self.hide_loading_indicator()
-        self.add_message(error, is_user=False)
-        self.statusBar().showMessage("Error occurred", 3000)
-
-    def log_message(self, content: str, sender_id: str):
-        worker = DatasetAgentWorker(
-            conversation_id=self.conversation_id,
-            sender_id=sender_id,
-            content=content
-        )
-        worker.logging_complete.connect(
-            lambda success: print("Message logged" if success else "Failed to log message"))
-        worker.error_occurred.connect(
-            lambda error: print(f"Error logging message: {error}"))
-        worker.finished_signal.connect(self.cleanup_thread)
-        self.worker_threads.append(worker)
-        worker.start()
-
-    def cleanup_thread(self):
-        self.worker_threads = [t for t in self.worker_threads if t.isRunning()]
+    def show_status_message(self, message: str, timeout: int = 3000):
+        self.statusBar().showMessage(message, timeout)
 
     def closeEvent(self, event):
         for thread in self.worker_threads:
@@ -609,88 +795,37 @@ class MainWindow(qtw.QMainWindow):
                 thread.quit()
                 thread.wait()
         event.accept()
-
-    def attach_file(self):
-        file_path, _ = qtw.QFileDialog.getOpenFileName(
-            self, "Select File", "", "All Files (*)"
-        )
-        
-        if file_path:
-            try:
-                with open(file_path, 'r', encoding='utf-8') as file:
-                    content = file.read()
-                    filename = Path(file_path).name
-                    prompt = f"Here is the content of file '{filename}':\n\n{content}\n\nPlease analyze this file."
-                    self.add_message(f"Attached file: {filename}", is_user=True)
-                    self.input_text.setPlainText(prompt)
-            except Exception as e:
-                self.add_message(f"Error reading file: {str(e)}", is_user=True)
-
-    def attach_image(self):
-        image_path, _ = qtw.QFileDialog.getOpenFileName(
-            self, "Select Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp *.gif)"
-        )
-        
-        if image_path:
-            try:
-                with open(image_path, "rb") as image_file:
-                    encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
-                
-                filename = Path(image_path).name
-                prompt = f"Here is an image named '{filename}' (base64 encoded):\n\n{encoded_string}\n\nPlease analyze this image."
-                self.add_message(f"Attached image: {filename}", is_user=True)
-                self.input_text.setPlainText(prompt)
-            except Exception as e:
-                self.add_message(f"Error processing image: {str(e)}", is_user=True)
-
-if __name__ == "__main__":
-    app = qtw.QApplication([])
-    
-    window = MainWindow()
-    window.show()
-    
-    app.exec()
 ```
 
-# mistral_agent.py
+# main.py
 
 ```py
-from PySide6 import QtCore as qtc
-from mistralai import Mistral
-import os
+from PySide6 import QtWidgets as qtw
+from dotenv import load_dotenv
+from frontend.views.main_window import MainWindow
+from frontend.controllers.main_controller import MainController
 
+load_dotenv()
 
-class MistralWorker(qtc.QThread):
-    response_received = qtc.Signal(str)
-    error_occurred = qtc.Signal(str)
-    finished_signal = qtc.Signal()
+def main():
+    app = qtw.QApplication([])
+    
+    controller = MainController()
+    window = MainWindow(controller)
+    
+    # Connect controller to view
+    controller.response_received = window.add_message
+    controller.error_occurred = window.add_message
+    controller.show_loading = window.show_loading_indicator
+    controller.hide_loading = window.hide_loading_indicator
+    controller.clear_input = window.clear_input
+    controller.show_status = window.show_status_message
+    
+    window.show()
+    app.exec()
 
-    def __init__(self, prompt: str, parent=None):
-        super().__init__(parent)
-        self.prompt = prompt
-
-    def run(self):
-        try:
-            api_key = os.environ.get("MISTRAL_API_KEY")
-            
-            if not api_key:
-                self.error_occurred.emit("Error: MISTRAL_API_KEY not found in environment variables.")
-                return
-
-            model = "mistral-large-latest"
-            client = Mistral(api_key=api_key)
-
-            messages = [{"role": "user", "content": self.prompt}]
-
-            chat_response = client.chat.complete(
-                model=model,
-                messages=messages,
-            )
-            self.response_received.emit(chat_response.choices[0].message.content)
-        except Exception as e:
-            self.error_occurred.emit(f"An error occurred: {e}")
-        finally:
-            self.finished_signal.emit()
+if __name__ == "__main__":
+    main()
 ```
 
 # requirements.txt
