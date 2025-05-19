@@ -1,9 +1,5 @@
 from PySide6 import QtWidgets as qtw
 from PySide6 import QtCore as qtc
-from PySide6 import QtGui as qtg
-from pathlib import Path
-import base64
-import uuid
 from ..components.chat_message import ChatMessageWidget
 from ..components.loading_widget import LoadingWidget
 
@@ -149,6 +145,7 @@ class MainWindow(qtw.QMainWindow):
         message = self.input_text.toPlainText().strip()
         if message:
             self.controller.send_message(message)
+            self.input_text.clear()
 
     def on_attach_file(self):
         file_path, _ = qtw.QFileDialog.getOpenFileName(

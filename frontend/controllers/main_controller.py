@@ -8,6 +8,14 @@ from backend.models.message import Message
 from backend.models.profile import Profile
 
 class MainController(qtc.QObject):
+    display_user_message = qtc.Signal(str)
+    display_ai_message = qtc.Signal(str)
+
+    show_loading = qtc.Signal()
+    hide_loading = qtc.Signal()
+
+    error_occurred = qtc.Signal(str)
+
     def __init__(self):
         super().__init__()
         self.conversation_id = str(uuid.uuid4())
@@ -45,6 +53,8 @@ class MainController(qtc.QObject):
     def send_message(self, message_text: str):
         if not message_text or not self.user_profile:
             return
+        
+        self.display_user_message.emit(message_text)
             
         # Create message object
         message = Message(
@@ -56,6 +66,8 @@ class MainController(qtc.QObject):
         # Log the message
         self.log_message(message)
         
+        self.show_loading.emit()
+
         # Send to Mistral
         self.send_to_mistral(message_text)
 
@@ -68,6 +80,10 @@ class MainController(qtc.QObject):
         worker.start()
 
     def handle_response(self, response: str):
+        self.hide_loading.emit()
+
+        self.display_ai_message.emit(response)
+
         if not self.ai_profile:
             return
             
@@ -82,7 +98,8 @@ class MainController(qtc.QObject):
         self.log_message(message)
 
     def handle_error(self, error: str):
-        print(f"Error from Mistral: {error}")
+        self.hide_loading.emit()
+        self.error_occurred.emit(error)
 
     def log_message(self, message: Message):
         worker = DatasetAgentWorker(message=message)

@@ -11,13 +11,15 @@ def main():
     controller = MainController()
     window = MainWindow(controller)
     
-    # Connect controller to view
-    controller.response_received = window.add_message
-    controller.error_occurred = window.add_message
-    controller.show_loading = window.show_loading_indicator
-    controller.hide_loading = window.hide_loading_indicator
-    controller.clear_input = window.clear_input
-    controller.show_status = window.show_status_message
+    # Connect controller signals to view methods
+    controller.display_user_message.connect(
+        lambda msg: window.add_message(msg, is_user=True))
+    controller.display_ai_message.connect(
+        lambda msg: window.add_message(msg, is_user=False))
+    controller.show_loading.connect(window.show_loading_indicator)
+    controller.hide_loading.connect(window.hide_loading_indicator)
+    controller.error_occurred.connect(
+        lambda error: window.add_message(error, is_user=False))
     
     window.show()
     app.exec()
