@@ -1,13 +1,21 @@
 import sqlite3
 import uuid
+import os
 from typing import Optional
 from PySide6 import QtCore as qtc
 from ..models.message import Message
 from ..models.profile import Profile
 
 class DatasetAgent:
-    def __init__(self, db_path: str = "chat_dataset.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        if db_path is None:
+            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.db_path = os.path.join(backend_dir, "chat_dataset.db")
+        else:
+            self.db_path = db_path
+            
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        
         self._init_db()
 
     def _init_db(self):
