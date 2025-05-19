@@ -209,20 +209,238 @@ class Profile:
         self.last_used_at = last_used_at
 ```
 
+# build.py
+
+```py
+import os
+import sys
+import subprocess
+import shutil
+import platform
+from pathlib import Path
+import tarfile
+import datetime
+
+from PIL import Image
+
+def create_linux_packages(app_name, build_dir):
+    print("\nCreating Linux packages...")
+
+    icon_ico = Path("frontend/assets/icon.ico")
+    icon_png = Path("frontend/assets/icon.png")
+
+    if icon_ico.exists():
+        icon_file = icon_ico
+
+        if not icon_png.exists():
+            try:
+                subprocess.run(["convert", str(icon_ico), str(icon_png)], check=True)
+                print("Converted icon.ico to icon.png")
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print("Warning: Could not convert icon.ico to icon.png")
+                icon_file = None
+    elif icon_png.exists():
+        icon_file = icon_png
+    else:
+        icon_file = None
+        print("Warning: No icon file found (looking for frontend/assets/icon.ico)")
+
+    deb_dir = Path("packages") / "deb"
+    (deb_dir / "DEBIAN").mkdir(parents=True, exist_ok=True)
+    (deb_dir / "usr" / "share" / app_name).mkdir(parents=True, exist_ok=True)
+    (deb_dir / "usr" / "share" / "applications").mkdir(parents=True, exist_ok=True)
+    (deb_dir / "usr" / "bin").mkdir(parents=True, exist_ok=True)
+
+    shutil.copytree(build_dir, deb_dir / "usr" / "share" / app_name, dirs_exist_ok=True)
+
+    desktop_content = f"""[Desktop Entry]
+Name=MyChatBot
+Comment=AI Chat Application
+Exec=/usr/share/{app_name}/{app_name}
+Icon=/usr/share/{app_name}/icon.ico
+Terminal=false
+Type=Application
+Categories=Utility;Application;
+"""
+
+    with open(deb_dir / "usr" / "share" / "applications" / f"{app_name}.desktop", "w") as f:
+        f.write(desktop_content)
+
+    bin_path = deb_dir / "usr" / "bin" / app_name
+    if bin_path.exists():
+        bin_path.unlink()
+    os.symlink(f"/usr/share/{app_name}/{app_name}", bin_path)
+
+    control_content = f"""Package: {app_name.lower()}
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Your Name <your.email@example.com>
+Description: AI Chat Application
+ MyChatBot is a PySide6-based application that uses Mistral AI API.
+"""
+    with open(deb_dir / "DEBIAN" / "control", "w") as f:
+        f.write(control_content)
+
+    try:
+        subprocess.run(["dpkg-deb", "--build", str(deb_dir), f"{app_name}.deb"], check=True)
+        print(f"Successfully created .deb package: {app_name}.deb")
+        deb_success = True
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to create .deb package: {e}")
+        deb_success = False
+
+    appimage_success = False
+    linuxdeploy_path = next((p for p in [
+        "/usr/bin/linuxdeploy-x86_64.AppImage",
+        "/usr/local/bin/linuxdeploy-x86_64.AppImage",
+        os.path.expanduser("~/bin/linuxdeploy-x86_64.AppImage"),
+        "linuxdeploy-x86_64.AppImage"
+    ] if os.path.exists(p)), None)
+
+    if linuxdeploy_path:
+        print("\nCreating AppImage...")
+        try:
+            appimage_dir = Path("packages") / "AppImage"
+            appimage_dir.mkdir(parents=True, exist_ok=True)
+            appdir = appimage_dir / f"{app_name}.AppDir"
+            if appdir.exists():
+                shutil.rmtree(appdir)
+
+            (appdir / "usr" / "bin").mkdir(parents=True)
+            shutil.copytree(build_dir, appdir / "usr" / "bin", dirs_exist_ok=True)
+
+            # Override desktop file for AppImage (Icon must match .png filename, no extension)
+            appimage_desktop_content = f"""[Desktop Entry]
+            Name=MyChatBot
+            Comment=AI Chat Application
+            Exec={app_name}
+            Icon={app_name}
+            Terminal=false
+            Type=Application
+            Categories=Utility;Application;
+            """
+
+            with open(appdir / f"{app_name}.desktop", "w", encoding="utf-8") as f:
+                f.write(appimage_desktop_content)
+
+
+            png_icon_path = appdir / f"{app_name}.png"
+            if icon_file and icon_file.exists():
+                if icon_file.suffix == ".ico":
+                    try:
+                        img = Image.open(icon_file)
+                        img.save(png_icon_path)
+                        print("Converted .ico to valid .png for AppImage")
+                    except Exception as e:
+                        print(f"Failed to convert image: {e}")
+                
+                elif icon_file.suffix == ".png":
+                    shutil.copy(icon_file, png_icon_path)
+
+            subprocess.run([
+                linuxdeploy_path,
+                "--appdir", str(appdir),
+                "--output", "appimage",
+                "--icon-file", str(png_icon_path) if png_icon_path.exists() else "",
+                "--desktop-file", str(appdir / f"{app_name}.desktop")
+            ], check=True)
+
+            appimage_files = list(appimage_dir.glob("*.AppImage"))
+            if appimage_files:
+                print(f"Successfully created AppImage: {appimage_files[0]}")
+                appimage_success = True
+            else:
+                print("AppImage creation failed - no output file found")
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to create AppImage: {e}")
+    else:
+        print("\nlinuxdeploy not found. Skipping AppImage creation.")
+
+    return deb_success or appimage_success
+
+def main():
+    print("Building MyChatBot application...")
+
+    app_name = "MyChatBot"
+    entry_point = "main.py"
+    version = "1.0.0"
+    build_date = datetime.datetime.now().strftime("%Y%m%d")
+
+    for dir_name in ['dist', 'build', 'packages']:
+        if os.path.exists(dir_name):
+            print(f"Cleaning previous {dir_name}...")
+            shutil.rmtree(dir_name)
+
+    pyinstaller_cmd = [
+        "pyinstaller",
+        "--clean",
+        "--noconfirm",
+        "--onedir",
+        f"--name={app_name}",
+        "--icon=frontend/assets/icon.ico",
+        "--add-data=backend:backend",
+        "--add-data=.env:.",
+        "--add-data=frontend/components:frontend/components",
+        "--add-data=frontend/controllers:frontend/controllers",
+        "--add-data=frontend/views:frontend/views",
+        "--hidden-import=PySide6.QtCore",
+        "--hidden-import=PySide6.QtGui",
+        "--hidden-import=PySide6.QtWidgets",
+        "--hidden-import=markdown",
+        "--hidden-import=mistralai",
+        "--hidden-import=python-dotenv",
+        "--hidden-import=sqlite3",
+        "--exclude-module=PySide6.QtNetwork",
+        "--exclude-module=PySide6.QtWebEngineCore",
+        "--exclude-module=PySide6.QtWebEngine",
+        "--exclude-module=PySide6.QtWebEngineWidgets",
+        entry_point
+    ]
+
+    print("Running PyInstaller...")
+    result = subprocess.run(pyinstaller_cmd)
+
+    if result.returncode != 0:
+        print("PyInstaller build failed!")
+        return 1
+
+    build_dir = Path("dist") / app_name
+    print(f"\nBuild completed successfully in {build_dir}")
+
+    if sys.platform == "linux":
+        with tarfile.open(f"{app_name}-{version}-{build_date}.tar.gz", "w:gz") as tar:
+            tar.add(build_dir, arcname=app_name)
+        print(f"Created portable tarball: {app_name}-{version}-{build_date}.tar.gz")
+        create_linux_packages(app_name, build_dir)
+
+    elif sys.platform == "win32":
+        print("\nFor Windows, consider using Inno Setup or NSIS to create an installer")
+        print(f"Executable available in: {build_dir}")
+
+    elif sys.platform == "darwin":
+        print("\nFor macOS, consider creating a DMG:")
+        print(f"hdiutil create -volname {app_name} -srcfolder {build_dir} -ov -format UDZO {app_name}.dmg")
+
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+```
+
 # build.sh
 
 ```sh
 #!/usr/bin/env bash
 
-# Cross-platform build script for MyChatBot Docker image
-
 set -euo pipefail
 
-# Get the directory containing this script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
 
-# Build using compose (preferred)
+# Build with explicit image name
 if command -v docker-compose &> /dev/null || command -v docker compose &> /dev/null; then
   cd "$PROJECT_ROOT"
   docker-compose build --no-cache
@@ -237,7 +455,7 @@ else
   exit 1
 fi
 
-echo "Build completed successfully"
+echo "Build completed successfully. Image tagged as: mychatbot:latest"
 ```
 
 # cleanup.sh
@@ -291,7 +509,9 @@ echo "Cleanup complete"
 version: '3.8'
 
 services:
-  mychatbot:
+  chatbot:  # Changed service name from 'mychatbot' to 'chatbot'
+    container_name: mychatbot  # Explicit container name
+    image: mychatbot:latest  # Explicit image name
     build:
       context: .
       args:
@@ -385,6 +605,50 @@ ENV QT_X11_NO_MITSHM=1
 # Run the application
 CMD ["python", "main.py"]
 ```
+
+# frontend/assets/app-icon.jpeg
+
+This is a binary file of the type: Image
+
+# frontend/assets/icon-0.png
+
+This is a binary file of the type: Image
+
+# frontend/assets/icon-1.png
+
+This is a binary file of the type: Image
+
+# frontend/assets/icon-2.png
+
+This is a binary file of the type: Image
+
+# frontend/assets/icon-3.png
+
+This is a binary file of the type: Image
+
+# frontend/assets/icon-4.png
+
+This is a binary file of the type: Image
+
+# frontend/assets/icon-5.png
+
+This is a binary file of the type: Image
+
+# frontend/assets/icon-6.png
+
+This is a binary file of the type: Image
+
+# frontend/assets/icon-7.png
+
+This is a binary file of the type: Image
+
+# frontend/assets/icon-8.png
+
+This is a binary file of the type: Image
+
+# frontend/assets/icon.ico
+
+This is a binary file of the type: Binary
 
 # frontend/components/chat_message.py
 
@@ -960,6 +1224,44 @@ class MainWindow(qtw.QMainWindow):
         event.accept()
 ```
 
+# god_command.sh
+
+```sh
+#!/bin/bash
+
+function runCommandInBackground() {
+  "$@" &
+  local pid=$!
+  wait $pid
+  local status=$?
+
+  if [ $status -ne 0 ]; then
+    echo -e "Error: Command: '$*' failed with exit code $status" >&2
+    return $status
+  fi
+
+  return 0
+}
+
+echo -e "Starting God Command... Please Wait..."
+
+sleep 2
+
+echo -e "Running 'python3 build.py'... Please Wait..."
+
+runCommandInBackground python3 build.py
+
+echo -e "Running 'bash cleanup.sh'... Please Wait..."
+
+echo -e "Running 'bash build.sh'... Please Wait..."
+
+echo -e "Running 'bash run.sh'... Please Wait..."
+
+echo -e "God Command Completed. Press Any Key To Exit"
+read
+
+```
+
 # LICENSE.txt
 
 ```txt
@@ -1019,151 +1321,152 @@ if __name__ == "__main__":
     main()
 ```
 
+# MyChatBot.deb
+
+This is a binary file of the type: Binary
+
+# MyChatBot.spec
+
+```spec
+# -*- mode: python ; coding: utf-8 -*-
+
+
+a = Analysis(
+    ['main.py'],
+    pathex=[],
+    binaries=[],
+    datas=[('backend', 'backend'), ('.env', '.'), ('frontend/components', 'frontend/components'), ('frontend/controllers', 'frontend/controllers'), ('frontend/views', 'frontend/views')],
+    hiddenimports=['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'markdown', 'mistralai', 'python-dotenv', 'sqlite3'],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=['PySide6.QtNetwork', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngine', 'PySide6.QtWebEngineWidgets'],
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='MyChatBot',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=['frontend/assets/icon.ico'],
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='MyChatBot',
+)
+
+```
+
 # README.md
 
 ```md
 # MyChatBot
 
-Welcome to MyChatBot. A PySide6-based application that uses Mistal AI API for users to send messages, attach files and images, and view responses from the Mistrl AI. This project was not hand written by me. This project serves as my first attempt at AI prompting. I elected to do something small with interacting with the AI and creating a raw, unsanitized dataset from those interactions. Each dataset is saved to a relational database on your system as I support user privacy. You may do with these datasets as you please. These prompts are done using DeekSeek and ChatGPT. It's for me to obtain an idea of how I'm going to build my model.
+Welcome to MyChatBot. A PySide6-based application that uses Mistal AI API for users to send messages, attach files and images, and view responses from the Mistrl AI. This project was not hand written by me. This project serves as my first attempt at AI prompting. I elected to do something small with interacting with the AI and creating a raw, unsanitized dataset from those interactions. Each dataset is saved to a relational database on your system as I support user privacy. You may do with these datasets as you please. These prompts are done using DeekSeek and ChatGPT. It's for me to obtain an idea of how I'm going to build my model. This application took approximately 50 prompts to get finalized to this first working version.
 
-Total Prompts: 
-23- deepseek
+## Docker Setup
 
-each "prompt" is considered an input message from me with/without files/images attached
+The application is now Dockerized for easier deployment and cross-platform compatibility.
+
+### Prerequisites
+- Docker Engine
+- Docker Compose
+- X11 server (for GUI on Linux/macOS)
+
+### Project Structure
+
+\`\`\`
+MyChatBot/
+├── backend/ # Database and AI backend
+├── frontend/ # GUI components
+├── .env # Environment variables
+├── Dockerfile # Docker configuration
+├── docker-compose.yml # Service definition
+├── build.sh # Build script
+├── run.sh # Run script
+└── cleanup.sh # Cleanup script
+\`\`\`
+
+
+## Quick Start
+
+1. **Build the container**:
+    \`\`\`bash
+    chmod +x *.sh && ./build.sh
+    \`\`\`
+2. **Run the application**:
+    \`\`\`bash
+    ./run.sh
+    \`\`\`
+3. Clean up when done:
+    \`\`\`bash
+    ./cleanup.sh
+    \`\`\`
+
+## Script Details
+
+- build.sh: Builds the Docker image with all dependencies
+
+- run.sh: Starts the application with proper X11 forwarding
+
+- cleanup.sh: Removes all project-specific Docker resources
 
 ## Features
 
-- **User Interface**: A clean and intuitive chat interface built with PySide6.
-- **Message Logging**: Messages are logged into an SQLite database.
-- **File and Image Attachments**: Users can attach and send files and images.
-- **Markdown Support**: Messages can be formatted using Markdown.
-- **Concurrency**: Uses QThread for background tasks to keep the UI responsive.
+- Chat Interface: Send messages and receive AI responses
 
-## Project Structure
+- File Attachments: Analyze text files and images
 
-\`\`\`
-.
-├── .env
-├── .gitignore
-├── chat_dataset.db
-├── chat_widget.py
-├── dataset_agent.py
-├── main.py
-├── mistral_agent.py
-├── requirements.txt
-└── README.md
-\`\`\`
+- Data Collection: All interactions are stored in SQLite
 
-## Prerequisites
+- Markdown Support: View formatted responses
 
-- Python 3.x
+- Cross-Platform: Runs on Linux, macOS, and Windows (WSL)
 
-## Installation
+## Development Notes
 
-1. Clone the repository:
+This project was developed through AI collaboration, with the Docker implementation being particularly challenging to configure correctly for cross-platform GUI support. The final solution includes:
 
-    \`\`\`sh
-    git clone https://github.com/mek0124/MyChatBot
-    cd MyChatBot
-    \`\`\`
+- Multi-stage Docker builds
 
-2. Create a virtual environment and activate it:
+- Automatic X11 forwarding
 
-    \`\`\`sh
-    python -m venv .venv
-    source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
-    \`\`\`
+- Isolated data storage
 
-3. Install the required dependencies:
-
-    \`\`\`sh
-    pip install -r requirements.txt
-    \`\`\`
-
-4. Set up the environment variables by creating a `.env` file in the project root:
-
-    \`\`\`ini
-    MISTRAL_API_KEY=your_mistral_api_key_here # do not encase in double quotes!
-    \`\`\`
-
-## Running the Application
-
-To run the application, execute the following command:
-
-\`\`\`sh
-python main.py
-
-# python3 main.py if on linux/mac
-\`\`\`
-
-## Codebase Overview
-
-### `.gitignore`
-
-Specifies files and directories to be ignored by Git.
-
-### `chat_dataset.db`
-
-> .gitignored by default
-
-A binary file containing the SQLite database used to store chat profiles and messages.
-
-### `chat_widget.py`
-
-Contains the custom PySide6 widgets used in the chat interface:
-
-- **LoadingWidget**: Displays a loading animation.
-- **ChatMessageWidget**: Displays chat messages with Markdown support and options to copy or save messages.
-
-### `dataset_agent.py`
-
-Handles interactions with the SQLite database:
-
-- **DatasetAgent**: Manages database operations for profiles and messages.
-- **DatasetAgentWorker**: A QThread for performing database operations in the background.
-
-### `main.py`
-
-The main entry point of the application:
-
-- **MainWindow**: The main window class that sets up the UI and handles user interactions.
-- Initializes profiles for the user and AI.
-- Manages sending messages and handling responses.
-
-### `mistral_agent.py`
-
-Handles interactions with the Mistral AI API:
-
-- **MistralWorker**: A QThread for sending messages to the Mistral AI API and receiving responses.
-
-### `requirements.txt`
-
-Lists the Python dependencies required to run the application.
-
-## Contributing
-
-1. Fork the repository.
-2. Create a new branch (`git checkout -b feature-branch`).
-3. Commit your changes (`git commit -am 'Add some feature'`).
-4. Push to the branch (`git push origin feature-branch`).
-5. Create a new Pull Request.
+- Clean resource management
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Thanks to the Mistral AI team for providing the API.
-- Thanks to the PySide6 community for their excellent UI framework.
+MIT License - see [LICENSE.txt](https://github.com/mek0124/MyChatBot/LICENSE.txt) for details.
 
 ```
 
 # requirements.txt
 
 ```txt
+altgraph==0.17.4
 annotated-types==0.7.0
 anyio==4.9.0
+build==1.2.2.post1
 certifi==2025.4.26
 eval-type-backport==0.2.2
 h11==0.16.0
@@ -1172,14 +1475,20 @@ httpx==0.28.1
 idna==3.10
 markdown==3.8
 mistralai==1.7.0
+packaging==25.0
+pillow==11.2.1
 pip==25.1.1
 pydantic==2.11.4
 pydantic-core==2.33.2
+pyinstaller==6.13.0
+pyinstaller-hooks-contrib==2025.4
+pyproject-hooks==1.2.0
 pyside6==6.9.0
 pyside6-addons==6.9.0
 pyside6-essentials==6.9.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.0
+setuptools==80.7.1
 shiboken6==6.9.0
 six==1.17.0
 sniffio==1.3.1
@@ -1187,6 +1496,8 @@ typing-extensions==4.13.2
 typing-inspection==0.4.0
 uv==0.7.5
 uvloop==0.21.0
+wheel==0.45.1
+
 ```
 
 # run.sh
