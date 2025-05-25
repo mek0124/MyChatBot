@@ -112,37 +112,38 @@ class MainController(qtc.QObject):
         worker.start()
 
     # frontend/controllers/main_controller.py
-    def attach_file(self, file_path: str):
-        try:
-            filename = Path(file_path).name
-            message = f"Attached file: {filename}"
+    def attach_file(self, file_path: str): 
+        try: 
+            filename = Path(file_path).name 
+            print(f"Attaching file: {filename} at path: {file_path}") # Debug print message = f"Attached file: {filename}" 
             self.display_user_message.emit(message, attachments=[file_path])
-            
+    
             if self.user_profile:
                 message_obj = Message(
-                    conversation_id=self.conversation_id,
-                    sender_id=self.user_profile.id,
-                    content=message
-                )
-                self.log_message(message_obj)
+                conversation_id=self.conversation_id,
+                sender_id=self.user_profile.id,
+                content=message
+            )
+            
+            self.log_message(message_obj)
         except Exception as e:
             self.error_occurred.emit(f"Error attaching file: {str(e)}")
 
-    def attach_image(self, image_path: str):
-        try:
-            filename = Path(image_path).name
-            message = f"Attached image: {filename}"
+    def attach_image(self, image_path: str): 
+        try: 
+            filename = Path(image_path).name 
+            print(f"Attaching image: {filename} at path: {image_path}") # Debug print message = f"Attached image: {filename}" 
             self.display_user_message.emit(message, attachments=[image_path])
-            
-            if self.user_profile:
-                message_obj = Message(
-                    conversation_id=self.conversation_id,
-                    sender_id=self.user_profile.id,
-                    content=message
-                )
-                self.log_message(message_obj)
-        except Exception as e:
-            self.error_occurred.emit(f"Error attaching image: {str(e)}")
+    
+        if self.user_profile:
+            message_obj = Message(
+                conversation_id=self.conversation_id,
+                sender_id=self.user_profile.id,
+                content=message
+            )
+            self.log_message(message_obj)
+    except Exception as e:
+        self.error_occurred.emit(f"Error attaching image: {str(e)}")
 
     def cleanup_thread(self):
         self.worker_threads = [t for t in self.worker_threads if t.isRunning()]
