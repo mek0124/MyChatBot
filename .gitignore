@@ -8,3 +8,4 @@ packages/
 *.tar.gz
 .deb
 .spec
+codebase.md
