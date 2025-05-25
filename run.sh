@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-./dist/
+./dist/linux/run_MyChatBot.sh
