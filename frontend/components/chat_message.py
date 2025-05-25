@@ -3,12 +3,14 @@ from PySide6 import QtCore as qtc
 from PySide6 import QtGui as qtg
 from datetime import datetime
 import markdown
+import os
 
 class ChatMessageWidget(qtw.QWidget):
-    def __init__(self, message: str, is_user: bool, parent=None):
+    def __init__(self, message: str, is_user: bool, attachments=None, parent=None):
         super().__init__(parent)
         self.message = message
         self.is_user = is_user
+        self.attachments = attachments or []
         self.setup_ui()
 
     def setup_ui(self):
@@ -16,6 +18,22 @@ class ChatMessageWidget(qtw.QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(5)
         self.setLayout(layout)
+
+        # Add attachments row if there are any
+        if self.attachments:
+            attachments_layout = qtw.QHBoxLayout()
+            attachments_layout.setContentsMargins(0, 0, 0, 5)
+            attachments_layout.setSpacing(5)
+            
+            for attachment in self.attachments:
+                icon = self.create_attachment_icon(attachment)
+                attachments_layout.addWidget(icon)
+            
+            # Add stretch to push icons to the left for user messages
+            if self.is_user:
+                attachments_layout.addStretch()
+            
+            layout.addLayout(attachments_layout)
 
         sender_label = qtw.QLabel("You" if self.is_user else "Mistral AI")
         sender_label.setAlignment(qtc.Qt.AlignLeft if self.is_user else qtc.Qt.AlignRight)
@@ -116,6 +134,35 @@ class ChatMessageWidget(qtw.QWidget):
         if not self.is_user and self.message:
             self.text_edit.setContextMenuPolicy(qtc.Qt.CustomContextMenu)
             self.text_edit.customContextMenuRequested.connect(self.show_context_menu)
+
+    def create_attachment_icon(self, file_path):
+        icon = qtw.QPushButton()
+        icon.setFlat(True)
+        icon.setFixedSize(32, 32)
+        icon.setProperty("class", "attachment-icon")
+        
+        file_name = os.path.basename(file_path)
+        ext = os.path.splitext(file_name)[1].lower()
+        
+        # Set icon based on file type
+        if ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp']:
+            pixmap = qtg.QPixmap(file_path)
+            if not pixmap.isNull():
+                pixmap = pixmap.scaled(28, 28, qtc.Qt.KeepAspectRatio, qtc.Qt.SmoothTransformation)
+                icon.setIcon(qtg.QIcon(pixmap))
+            else:
+                icon.setIcon(self.style().standardIcon(qtw.QStyle.SP_FileIcon))
+            icon.setToolTip(f"Image: {file_name}")
+        else:
+            icon.setIcon(self.style().standardIcon(qtw.QStyle.SP_FileIcon))
+            icon.setToolTip(f"File: {file_name}")
+        
+        icon.clicked.connect(lambda: self.open_attachment(file_path))
+        return icon
+
+    def open_attachment(self, file_path):
+        if os.path.exists(file_path):
+            qtg.QDesktopServices.openUrl(qtc.QUrl.fromLocalFile(file_path))
 
     def adjust_height(self):
         doc = self.text_edit.document()

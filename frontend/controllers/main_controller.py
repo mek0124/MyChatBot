@@ -8,7 +8,7 @@ from backend.models.message import Message
 from backend.models.profile import Profile
 
 class MainController(qtc.QObject):
-    display_user_message = qtc.Signal(str)
+    display_user_message = qtc.Signal(str, list) 
     display_ai_message = qtc.Signal(str)
 
     show_loading = qtc.Signal()
@@ -111,24 +111,38 @@ class MainController(qtc.QObject):
         self.worker_threads.append(worker)
         worker.start()
 
+    # frontend/controllers/main_controller.py
     def attach_file(self, file_path: str):
         try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                content = file.read()
-                filename = Path(file_path).name
-                return f"Here is the content of file '{filename}':\n\n{content}\n\nPlease analyze this file."
+            filename = Path(file_path).name
+            message = f"Attached file: {filename}"
+            self.display_user_message.emit(message, attachments=[file_path])
+            
+            if self.user_profile:
+                message_obj = Message(
+                    conversation_id=self.conversation_id,
+                    sender_id=self.user_profile.id,
+                    content=message
+                )
+                self.log_message(message_obj)
         except Exception as e:
-            return f"Error reading file: {str(e)}"
+            self.error_occurred.emit(f"Error attaching file: {str(e)}")
 
     def attach_image(self, image_path: str):
         try:
-            with open(image_path, "rb") as image_file:
-                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
-            
             filename = Path(image_path).name
-            return f"Here is an image named '{filename}' (base64 encoded):\n\n{encoded_string}\n\nPlease analyze this image."
+            message = f"Attached image: {filename}"
+            self.display_user_message.emit(message, attachments=[image_path])
+            
+            if self.user_profile:
+                message_obj = Message(
+                    conversation_id=self.conversation_id,
+                    sender_id=self.user_profile.id,
+                    content=message
+                )
+                self.log_message(message_obj)
         except Exception as e:
-            return f"Error processing image: {str(e)}"
+            self.error_occurred.emit(f"Error attaching image: {str(e)}")
 
     def cleanup_thread(self):
         self.worker_threads = [t for t in self.worker_threads if t.isRunning()]

@@ -139,6 +139,15 @@ class MainWindow(qtw.QMainWindow):
             QMessageBox QLabel {
                 color: rgb(177,203,231);
             }
+            QPushButton[flat="true"] {
+                border: 1px solid rgb(33,84,141);
+                border-radius: 4px;
+                padding: 2px;
+                background-color: rgba(0,38,80,0.7);
+            }
+            QPushButton[flat="true"]:hover {
+                background-color: rgba(94,147,207,0.7);
+            }
         """)
 
     def on_send_clicked(self):
@@ -163,8 +172,8 @@ class MainWindow(qtw.QMainWindow):
         if image_path:
             self.controller.attach_image(image_path)
 
-    def add_message(self, message: str, is_user: bool):
-        message_widget = ChatMessageWidget(message, is_user)
+    def add_message(self, message: str, is_user: bool, attachements = None):
+        message_widget = ChatMessageWidget(message, is_user, attachments)
         self.chat_layout.addWidget(message_widget)
         
         animation = qtc.QPropertyAnimation(message_widget, b"windowOpacity")
